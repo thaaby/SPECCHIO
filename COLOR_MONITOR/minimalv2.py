@@ -253,8 +253,22 @@ COMMON_ANODE = False
 # ============================================================
 # TESTO OVERLAY (Specchio)
 # ============================================================
-TEXT_OVERLAY = "TEST"
+TEXT_OVERLAY = "UAH!"
 TEXT_OVERLAY_ENABLED = True
+
+# Palette colori testo: (nome, BGR). None = automatico (bianco/nero da contrasto)
+TEXT_COLOR_PALETTE = [
+    ("Auto",      None),
+    ("Bianco",    (255, 255, 255)),
+    ("Rosso",     (0,   0,   255)),
+    ("Verde",     (0,   255, 0  )),
+    ("Blu",       (255, 0,   0  )),
+    ("Giallo",    (0,   255, 255)),
+    ("Arancione", (0,   165, 255)),
+    ("Magenta",   (255, 0,   255)),
+    ("Ciano",     (255, 255, 0  )),
+]
+TEXT_COLOR_IDX = 0   # Premi [C] per ciclare
 
 gamma_table = np.array([((i / 255.0) ** GAMMA) * 255
                          for i in np.arange(0, 256)]).astype("uint8")
@@ -540,12 +554,15 @@ def apply_text_overlay(frame_bgr, text):
     else:
         mean_brightness = 128.0
 
-    if mean_brightness > 128:
-        text_color    = (0, 0, 0)
-        outline_color = (255, 255, 255)
+    # Outline sempre in contrasto con lo sfondo (garantisce leggibilità)
+    outline_color = (255, 255, 255) if mean_brightness <= 128 else (0, 0, 0)
+
+    # Colore testo: usa la palette se selezionata, altrimenti auto da contrasto
+    _, selected_bgr = TEXT_COLOR_PALETTE[TEXT_COLOR_IDX]
+    if selected_bgr is not None:
+        text_color = selected_bgr
     else:
-        text_color    = (255, 255, 255)
-        outline_color = (0, 0, 0)
+        text_color = (255, 255, 255) if mean_brightness <= 128 else (0, 0, 0)
 
     # Disegna ogni riga su canvas temporaneo, poi specchia
     tmp = np.zeros_like(frame_bgr)
@@ -955,11 +972,12 @@ def main():
     print("  [F] - Fullscreen (toggle)")
     print("  [I] - Inverti colori per LED (Common Anode)")
     print(f"  [T] - Nascondi/mostra scritta '{TEXT_OVERLAY}'")
+    print("  [C] - Cambia colore scritta (Auto/Bianco/Rosso/Verde/Blu/...)")
     print("  [Q/ESC] - Esci")
     print("-" * 50 + "\n")
     
     # --- CONNESSIONI ---
-    global COMMON_ANODE, TEXT_OVERLAY_ENABLED
+    global COMMON_ANODE, TEXT_OVERLAY_ENABLED, TEXT_COLOR_IDX
     udp_sock = create_udp_socket()
     arduino_ser = create_arduino_serial()
     
@@ -1110,6 +1128,10 @@ def main():
                 TEXT_OVERLAY_ENABLED = not TEXT_OVERLAY_ENABLED
                 state = "ON" if TEXT_OVERLAY_ENABLED else "OFF"
                 print(f"\n[TOGGLE] Testo overlay '{TEXT_OVERLAY}': {state}")
+            elif key == ord('c'):
+                TEXT_COLOR_IDX = (TEXT_COLOR_IDX + 1) % len(TEXT_COLOR_PALETTE)
+                nome, _ = TEXT_COLOR_PALETTE[TEXT_COLOR_IDX]
+                print(f"\n[COLORE] Testo: {nome}")
     
     finally:
         cap.release()
