@@ -254,7 +254,7 @@ COMMON_ANODE = False
 # TESTO OVERLAY (Specchio)
 # ============================================================
 TEXT_OVERLAY = "UAH!"
-TEXT_OVERLAY_ENABLED = True
+TEXT_OVERLAY_ENABLED = True 
 
 # Palette colori testo: (nome, BGR). None = automatico (bianco/nero da contrasto)
 TEXT_COLOR_PALETTE = [
@@ -269,6 +269,12 @@ TEXT_COLOR_PALETTE = [
     ("Ciano",     (255, 255, 0  )),
 ]
 TEXT_COLOR_IDX = 0   # Premi [C] per ciclare
+
+TEXT_OUTLINE_ENABLED = True  # Premi [O] per attivare/disattivare il contorno
+
+TEXT_SCROLL_ENABLED = False  # Premi [S] per attivare lo scorrimento
+TEXT_SCROLL_SPEED   = 1.5    # Pixel per frame
+_scroll_x = 0.0              # Posizione interna dello scorrimento
 
 gamma_table = np.array([((i / 255.0) ** GAMMA) * 255
                          for i in np.arange(0, 256)]).astype("uint8")
@@ -565,13 +571,35 @@ def apply_text_overlay(frame_bgr, text):
         text_color = (255, 255, 255) if mean_brightness <= 128 else (0, 0, 0)
 
     # Disegna ogni riga su canvas temporaneo, poi specchia
+    global _scroll_x
     tmp = np.zeros_like(frame_bgr)
-    for i, line in enumerate(lines):
-        (tw, _), _ = cv2.getTextSize(line, font, scale, thickness)
-        x = (w - tw) // 2
-        y = start_y + i * (line_h + line_gap)
-        cv2.putText(tmp, line, (x, y), font, scale, outline_color, thickness + 2, cv2.LINE_AA)
-        cv2.putText(tmp, line, (x, y), font, scale, text_color,    thickness,     cv2.LINE_AA)
+
+    # Larghezza massima tra tutte le righe (usata per il wrap dello scroll)
+    max_tw = max(cv2.getTextSize(l, font, scale, thickness)[0][0] for l in lines)
+
+    if TEXT_SCROLL_ENABLED:
+        # In modalità scroll tutte le righe condividono la stessa x di scorrimento.
+        # Il testo entra da sinistra nel canvas (= destra fisica dopo il flip) e
+        # scorre verso destra nel canvas (= sinistra fisica), effetto marquee classico.
+        x_base = int(_scroll_x)
+        _scroll_x += TEXT_SCROLL_SPEED
+        if _scroll_x > w:          # testo uscito a destra del canvas = sinistra fisica
+            _scroll_x = -max_tw    # riparte da sinistra del canvas = destra fisica
+
+        for i, line in enumerate(lines):
+            y = start_y + i * (line_h + line_gap)
+            if TEXT_OUTLINE_ENABLED:
+                cv2.putText(tmp, line, (x_base, y), font, scale, outline_color, thickness + 2, cv2.LINE_AA)
+            cv2.putText(tmp, line, (x_base, y), font, scale, text_color, thickness, cv2.LINE_AA)
+    else:
+        # Modalità statica: testo centrato orizzontalmente
+        for i, line in enumerate(lines):
+            (tw, _), _ = cv2.getTextSize(line, font, scale, thickness)
+            x = (w - tw) // 2
+            y = start_y + i * (line_h + line_gap)
+            if TEXT_OUTLINE_ENABLED:
+                cv2.putText(tmp, line, (x, y), font, scale, outline_color, thickness + 2, cv2.LINE_AA)
+            cv2.putText(tmp, line, (x, y), font, scale, text_color, thickness, cv2.LINE_AA)
 
     tmp = cv2.flip(tmp, 1)
     mask = np.any(tmp > 0, axis=2)
@@ -973,11 +1001,13 @@ def main():
     print("  [I] - Inverti colori per LED (Common Anode)")
     print(f"  [T] - Nascondi/mostra scritta '{TEXT_OVERLAY}'")
     print("  [C] - Cambia colore scritta (Auto/Bianco/Rosso/Verde/Blu/...)")
+    print("  [O] - Contorno testo ON/OFF")
+    print("  [S] - Scorrimento testo (marquee, toggle)")
     print("  [Q/ESC] - Esci")
     print("-" * 50 + "\n")
     
     # --- CONNESSIONI ---
-    global COMMON_ANODE, TEXT_OVERLAY_ENABLED, TEXT_COLOR_IDX
+    global COMMON_ANODE, TEXT_OVERLAY_ENABLED, TEXT_COLOR_IDX, TEXT_SCROLL_ENABLED, _scroll_x, TEXT_OUTLINE_ENABLED
     udp_sock = create_udp_socket()
     arduino_ser = create_arduino_serial()
     
@@ -1132,6 +1162,15 @@ def main():
                 TEXT_COLOR_IDX = (TEXT_COLOR_IDX + 1) % len(TEXT_COLOR_PALETTE)
                 nome, _ = TEXT_COLOR_PALETTE[TEXT_COLOR_IDX]
                 print(f"\n[COLORE] Testo: {nome}")
+            elif key == ord('o'):
+                TEXT_OUTLINE_ENABLED = not TEXT_OUTLINE_ENABLED
+                state = "ON" if TEXT_OUTLINE_ENABLED else "OFF"
+                print(f"\n[OUTLINE] Contorno testo: {state}")
+            elif key == ord('s'):
+                TEXT_SCROLL_ENABLED = not TEXT_SCROLL_ENABLED
+                _scroll_x = 0.0   # riparte dall'inizio ogni volta che si attiva
+                state = "ON" if TEXT_SCROLL_ENABLED else "OFF"
+                print(f"\n[SCROLL] Scorrimento testo: {state}")
     
     finally:
         cap.release()
