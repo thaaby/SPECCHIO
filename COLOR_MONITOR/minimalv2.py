@@ -244,7 +244,7 @@ LOGICAL_WIDTH = ARDUINO_COLS  # default, ricalcolato al boot
 LOGICAL_HEIGHT = ARDUINO_ROWS
 
 ARDUINO_PANEL_ORDER = [6, 5, 4, 3, 2, 1, 0]
-ARDUINO_PANEL_START_BOTTOM = [False, False, False, False, False, False, False]
+ARDUINO_PANEL_START_BOTTOM = [True, True, True, True, True, True, True]
 ARDUINO_SERPENTINE_X = True
 
 GAMMA = 2.5
@@ -253,7 +253,7 @@ COMMON_ANODE = False
 # ============================================================
 # TESTO OVERLAY (Specchio)
 # ============================================================
-TEXT_OVERLAY = "UAH!"
+TEXT_OVERLAY = "FORZA NAPOLI!"
 TEXT_OVERLAY_ENABLED = True 
 
 # Palette colori testo: (nome, BGR). None = automatico (bianco/nero da contrasto)
