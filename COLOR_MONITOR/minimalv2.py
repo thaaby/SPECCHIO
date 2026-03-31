@@ -229,22 +229,22 @@ ESP_START_BOTTOM = False  # False = in alto a sx. True = in basso a sx.
 # ============================================================
 # CONFIGURAZIONE ARDUINO VIDEO (SERIALE)
 # ============================================================
-ARDUINO_ENABLED = "auto"  # "auto" = rileva automaticamente, True = forza ON, False = forza OFF
+ARDUINO_ENABLED = True   # "auto" = rileva automaticamente, True = forza ON, False = forza OFF
 ARDUINO_PORT = "auto"
 ARDUINO_BAUD = 500000
 ARDUINO_ROWS = 32
-ARDUINO_COLS = 32
+ARDUINO_COLS = 56
 ARDUINO_PANEL_W = 8
 ARDUINO_PANEL_H = 32
-ARDUINO_PANELS_COUNT = 4
+ARDUINO_PANELS_COUNT = 7
 ARDUINO_MIRROR_HORIZONTAL = True
 
 # LA RISOLUZIONE PRINCIPALE DELLA LAVAGNA (calcolata in detect_hardware())
 LOGICAL_WIDTH = ARDUINO_COLS  # default, ricalcolato al boot
 LOGICAL_HEIGHT = ARDUINO_ROWS
 
-ARDUINO_PANEL_ORDER = [3, 2, 1, 0]
-ARDUINO_PANEL_START_BOTTOM = [False, False, False, False]
+ARDUINO_PANEL_ORDER = [6, 5, 4, 3, 2, 1, 0]
+ARDUINO_PANEL_START_BOTTOM = [False, False, False, False, False, False, False]
 ARDUINO_SERPENTINE_X = True
 
 GAMMA = 2.5
@@ -479,7 +479,7 @@ def send_arduino_frame(ser, frame, use_gamma=True):
     2. Converte BGR → RGB
     3. Applica gamma (opzionale)
     4. Rimappa serpentina
-    5. Invia: byte 'V' + 3072 byte RGB
+    5. Invia: MAGIC_HEADER + NUM_LEDS*3 byte RGB
     """
     # Ridimensiona alla risoluzione della matrice LED
     small = cv2.resize(frame, (ARDUINO_COLS, ARDUINO_ROWS), interpolation=cv2.INTER_AREA)
@@ -488,7 +488,11 @@ def send_arduino_frame(ser, frame, use_gamma=True):
     apply_text_overlay(small, TEXT_OVERLAY)
 
     rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
-    
+
+    # Specchio orizzontale se richiesto
+    if ARDUINO_MIRROR_HORIZONTAL:
+        rgb = rgb[:, ::-1, :]
+
     # Correggi gamma
     if use_gamma:
         rgb = gamma_table[rgb]
