@@ -9,8 +9,14 @@ import time
 import sys
 from datetime import datetime
 import socket
+import os
 import glob
 import subprocess
+try:
+    from PIL import Image as _PILImage, ImageDraw as _ImageDraw, ImageFont as _PILImageFont
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
 try:
     import serial
     HAS_SERIAL = True
@@ -253,7 +259,7 @@ COMMON_ANODE = False
 # ============================================================
 # TESTO OVERLAY (Specchio)
 # ============================================================
-TEXT_OVERLAY = "FORZA NAPOLI!"
+TEXT_OVERLAY = "UAH!"
 TEXT_OVERLAY_ENABLED = True 
 
 # Palette colori testo: (nome, BGR). None = automatico (bianco/nero da contrasto)
@@ -272,9 +278,27 @@ TEXT_COLOR_IDX = 0   # Premi [C] per ciclare
 
 TEXT_OUTLINE_ENABLED = True  # Premi [O] per attivare/disattivare il contorno
 
+TEXT_FONT_PATH = "/Users/nta11/Library/Fonts/Uah_unfontpossibile-Regular (1).ttf"   # es: "/Users/nta11/Desktop/MioFont.ttf" — None = usa font OpenCV
+TEXT_FONT_SIZE = 18   # Dimensione in pixel; None = auto (proporzionale alla risoluzione)
+
 TEXT_SCROLL_ENABLED = False  # Premi [S] per attivare lo scorrimento
 TEXT_SCROLL_SPEED   = 1.5    # Pixel per frame
 _scroll_x = 0.0              # Posizione interna dello scorrimento
+
+_pil_font_cache = {}
+
+def _load_pil_font(path, size):
+    key = (path, size)
+    if key not in _pil_font_cache:
+        _pil_font_cache[key] = _PILImageFont.truetype(path, size)
+    return _pil_font_cache[key]
+
+def _pil_text_size(font_obj, text):
+    try:
+        bbox = font_obj.getbbox(text)
+        return bbox[2] - bbox[0], bbox[3] - bbox[1]
+    except AttributeError:
+        return font_obj.getsize(text)
 
 gamma_table = np.array([((i / 255.0) ** GAMMA) * 255
                          for i in np.arange(0, 256)]).astype("uint8")
@@ -516,28 +540,38 @@ def niente(x):
 def apply_text_overlay(frame_bgr, text):
     """Sovrappone testo centrato con contrasto automatico adattivo.
 
+    Se TEXT_FONT_PATH è impostato e Pillow è installato, usa il font TTF/OTF
+    personalizzato; altrimenti usa il font OpenCV di default.
     Il testo viene disegnato su un canvas temporaneo e poi specchiato
-    orizzontalmente prima di essere incollato sul frame. Questo compensa
-    il ribaltamento fisico dei pannelli LED, facendo apparire il testo
-    corretto al pubblico.
+    orizzontalmente prima di essere incollato sul frame.
     """
     if not text or not TEXT_OVERLAY_ENABLED:
         return frame_bgr
 
     h, w = frame_bgr.shape[:2]
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    scale = max(0.3, min(w, h) / 80.0)
-    thickness = max(1, int(scale * 1.5))
+
+    use_pil = HAS_PIL and TEXT_FONT_PATH and os.path.isfile(TEXT_FONT_PATH)
+
+    if use_pil:
+        font_size = TEXT_FONT_SIZE if TEXT_FONT_SIZE else max(8, min(w, h) // 2)
+        pil_font = _load_pil_font(TEXT_FONT_PATH, font_size)
+        def measure(t):
+            return _pil_text_size(pil_font, t)
+    else:
+        font_cv = cv2.FONT_HERSHEY_SIMPLEX
+        scale = max(0.3, min(w, h) / 80.0)
+        thickness = max(1, int(scale * 1.5))
+        def measure(t):
+            (tw, th), _ = cv2.getTextSize(t, font_cv, scale, thickness)
+            return tw, th
 
     # --- WORD WRAP ---
-    # Suddivide il testo in righe che entrano nel 90% della larghezza canvas.
-    # Mantiene la scala massima leggibile invece di rimpicciolire il font.
     words = text.split()
     lines = []
     current = ""
     for word in words:
         candidate = (current + " " + word).strip()
-        (tw_c, _), _ = cv2.getTextSize(candidate, font, scale, thickness)
+        tw_c, _ = measure(candidate)
         if tw_c > w * 0.90 and current:
             lines.append(current)
             current = word
@@ -546,67 +580,98 @@ def apply_text_overlay(frame_bgr, text):
     if current:
         lines.append(current)
 
-    # Altezza di una riga e interlinea
-    (_, line_h), baseline = cv2.getTextSize("A", font, scale, thickness)
+    line_h = measure("A")[1]
     line_gap = int(line_h * 0.4)
     total_h = len(lines) * line_h + (len(lines) - 1) * line_gap
 
-    # Y di partenza per centrare verticalmente il blocco
-    start_y = max(line_h, (h - total_h) // 2 + line_h)
+    # Y di partenza: per OpenCV (baseline) aggiunge line_h; per PIL (top-left) no
+    if use_pil:
+        start_y = max(0, (h - total_h) // 2)
+    else:
+        start_y = max(line_h, (h - total_h) // 2 + line_h)
 
-    # Misura luminosità sull'area centrale del blocco testo (posizione specchiata)
+    # Misura luminosità sull'area centrale
     cx = w // 2
     y1 = max(0, start_y - line_h)
     y2 = min(h, start_y + total_h)
     roi = frame_bgr[y1:y2, max(0, cx - w // 4):min(w, cx + w // 4)]
-    if roi.size > 0:
-        mean_brightness = float(np.mean(cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)))
-    else:
-        mean_brightness = 128.0
+    mean_brightness = float(np.mean(cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY))) if roi.size > 0 else 128.0
 
-    # Outline sempre in contrasto con lo sfondo (garantisce leggibilità)
     outline_color = (255, 255, 255) if mean_brightness <= 128 else (0, 0, 0)
-
-    # Colore testo: usa la palette se selezionata, altrimenti auto da contrasto
     _, selected_bgr = TEXT_COLOR_PALETTE[TEXT_COLOR_IDX]
-    if selected_bgr is not None:
-        text_color = selected_bgr
-    else:
-        text_color = (255, 255, 255) if mean_brightness <= 128 else (0, 0, 0)
+    text_color = selected_bgr if selected_bgr is not None else outline_color
 
-    # Disegna ogni riga su canvas temporaneo, poi specchia
     global _scroll_x
-    tmp = np.zeros_like(frame_bgr)
+    max_tw = max(measure(l)[0] for l in lines)
 
-    # Larghezza massima tra tutte le righe (usata per il wrap dello scroll)
-    max_tw = max(cv2.getTextSize(l, font, scale, thickness)[0][0] for l in lines)
+    if use_pil:
+        def bgr2rgb(c): return (c[2], c[1], c[0])
+        tc = bgr2rgb(text_color)
+        oc = bgr2rgb(outline_color)
+        WHITE_RGB = (255, 255, 255)
+        outline_offsets = [(-1, 0), (1, 0), (0, -1), (0, 1)] if TEXT_OUTLINE_ENABLED else []
 
-    if TEXT_SCROLL_ENABLED:
-        # In modalità scroll tutte le righe condividono la stessa x di scorrimento.
-        # Il testo entra da sinistra nel canvas (= destra fisica dopo il flip) e
-        # scorre verso destra nel canvas (= sinistra fisica), effetto marquee classico.
-        x_base = int(_scroll_x)
-        _scroll_x += TEXT_SCROLL_SPEED
-        if _scroll_x > w:          # testo uscito a destra del canvas = sinistra fisica
-            _scroll_x = -max_tw    # riparte da sinistra del canvas = destra fisica
+        tmp_pil      = _PILImage.new('RGB', (w, h), (0, 0, 0))
+        tmp_pil_mask = _PILImage.new('RGB', (w, h), (0, 0, 0))
+        draw      = _ImageDraw.Draw(tmp_pil)
+        draw_mask = _ImageDraw.Draw(tmp_pil_mask)
 
-        for i, line in enumerate(lines):
-            y = start_y + i * (line_h + line_gap)
-            if TEXT_OUTLINE_ENABLED:
-                cv2.putText(tmp, line, (x_base, y), font, scale, outline_color, thickness + 2, cv2.LINE_AA)
-            cv2.putText(tmp, line, (x_base, y), font, scale, text_color, thickness, cv2.LINE_AA)
+        if TEXT_SCROLL_ENABLED:
+            x_base = int(_scroll_x)
+            _scroll_x += TEXT_SCROLL_SPEED
+            if _scroll_x > w:
+                _scroll_x = -max_tw
+            for i, line in enumerate(lines):
+                y = start_y + i * (line_h + line_gap)
+                for dx, dy in outline_offsets:
+                    draw.text((x_base + dx, y + dy), line, font=pil_font, fill=oc)
+                    draw_mask.text((x_base + dx, y + dy), line, font=pil_font, fill=WHITE_RGB)
+                draw.text((x_base, y), line, font=pil_font, fill=tc)
+                draw_mask.text((x_base, y), line, font=pil_font, fill=WHITE_RGB)
+        else:
+            for i, line in enumerate(lines):
+                tw, _ = measure(line)
+                x = (w - tw) // 2
+                y = start_y + i * (line_h + line_gap)
+                for dx, dy in outline_offsets:
+                    draw.text((x + dx, y + dy), line, font=pil_font, fill=oc)
+                    draw_mask.text((x + dx, y + dy), line, font=pil_font, fill=WHITE_RGB)
+                draw.text((x, y), line, font=pil_font, fill=tc)
+                draw_mask.text((x, y), line, font=pil_font, fill=WHITE_RGB)
+
+        tmp      = cv2.cvtColor(np.array(tmp_pil),      cv2.COLOR_RGB2BGR)
+        tmp_mask = cv2.cvtColor(np.array(tmp_pil_mask), cv2.COLOR_RGB2BGR)
     else:
-        # Modalità statica: testo centrato orizzontalmente
-        for i, line in enumerate(lines):
-            (tw, _), _ = cv2.getTextSize(line, font, scale, thickness)
-            x = (w - tw) // 2
-            y = start_y + i * (line_h + line_gap)
-            if TEXT_OUTLINE_ENABLED:
-                cv2.putText(tmp, line, (x, y), font, scale, outline_color, thickness + 2, cv2.LINE_AA)
-            cv2.putText(tmp, line, (x, y), font, scale, text_color, thickness, cv2.LINE_AA)
+        tmp      = np.zeros_like(frame_bgr)
+        tmp_mask = np.zeros_like(frame_bgr)
+        WHITE = (255, 255, 255)
 
-    tmp = cv2.flip(tmp, 1)
-    mask = np.any(tmp > 0, axis=2)
+        if TEXT_SCROLL_ENABLED:
+            x_base = int(_scroll_x)
+            _scroll_x += TEXT_SCROLL_SPEED
+            if _scroll_x > w:
+                _scroll_x = -max_tw
+            for i, line in enumerate(lines):
+                y = start_y + i * (line_h + line_gap)
+                if TEXT_OUTLINE_ENABLED:
+                    cv2.putText(tmp,      line, (x_base, y), font_cv, scale, outline_color, thickness + 2, cv2.LINE_AA)
+                    cv2.putText(tmp_mask, line, (x_base, y), font_cv, scale, WHITE,         thickness + 2, cv2.LINE_AA)
+                cv2.putText(tmp,      line, (x_base, y), font_cv, scale, text_color, thickness, cv2.LINE_AA)
+                cv2.putText(tmp_mask, line, (x_base, y), font_cv, scale, WHITE,      thickness, cv2.LINE_AA)
+        else:
+            for i, line in enumerate(lines):
+                tw, _ = measure(line)
+                x = (w - tw) // 2
+                y = start_y + i * (line_h + line_gap)
+                if TEXT_OUTLINE_ENABLED:
+                    cv2.putText(tmp,      line, (x, y), font_cv, scale, outline_color, thickness + 2, cv2.LINE_AA)
+                    cv2.putText(tmp_mask, line, (x, y), font_cv, scale, WHITE,         thickness + 2, cv2.LINE_AA)
+                cv2.putText(tmp,      line, (x, y), font_cv, scale, text_color, thickness, cv2.LINE_AA)
+                cv2.putText(tmp_mask, line, (x, y), font_cv, scale, WHITE,      thickness, cv2.LINE_AA)
+
+    tmp      = cv2.flip(tmp,      1)
+    tmp_mask = cv2.flip(tmp_mask, 1)
+    mask = np.any(tmp_mask > 0, axis=2)
     frame_bgr[mask] = tmp[mask]
 
     return frame_bgr
