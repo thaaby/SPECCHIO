@@ -386,6 +386,8 @@ def detect_hardware():
 
 def create_udp_socket():
     """Crea un socket UDP per comunicare con i pannelli ESP."""
+    if not ESP_ENABLED:
+        return None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         print(f"[OK] Socket UDP creato -> {len(ESP_IPS)} pannelli sulla porta {ESP_PORT}")
