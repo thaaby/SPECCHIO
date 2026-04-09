@@ -233,6 +233,11 @@ ESP_SERPENTINE_HORIZONTAL = True
 ESP_START_BOTTOM = False  # False = in alto a sx. True = in basso a sx.
 
 # ============================================================
+# CONFIGURAZIONE WEBCAM
+# ============================================================
+CAMERA_SCAN = False  # False = usa webcam 0 direttamente. True = scansiona e scegli.
+
+# ============================================================
 # CONFIGURAZIONE ARDUINO VIDEO (SERIALE)
 # ============================================================
 ARDUINO_ENABLED = True   # "auto" = rileva automaticamente, True = forza ON, False = forza OFF
@@ -987,21 +992,25 @@ def list_cameras():
 
 def select_camera():
     """Seleziona webcam."""
+    if not CAMERA_SCAN:
+        print("[CAM] Webcam 0 (default — CAMERA_SCAN = False)")
+        return 0
+
     print("\n[SCAN] Ricerca webcam...")
     cameras = list_cameras()
-    
+
     if not cameras:
         print("[!] Nessuna webcam trovata, provo ID 0...")
         return 0
-    
+
     print(f"[CAM] Trovate: {len(cameras)}")
     for cam_id in cameras:
         print(f"  [{cam_id}] Camera {cam_id}")
-    
+
     if len(cameras) == 1:
         print(f"[OK] Camera {cameras[0]} selezionata")
         return cameras[0]
-    
+
     while True:
         try:
             choice = input(f"> Seleziona camera (0-{cameras[-1]}): ")
@@ -1052,8 +1061,7 @@ def main():
     # ── AUTO-RILEVAMENTO HARDWARE ──
     detect_hardware()
 
-    # --- MODIFICA 1: Bypassata la selezione manuale per avvii automatici in background ---
-    camera_id = 0 
+    camera_id = select_camera()
     
     print(f"\n[CAM] Avvio webcam {camera_id}...")
     cap = cv2.VideoCapture(camera_id)

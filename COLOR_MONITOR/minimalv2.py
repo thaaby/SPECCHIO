@@ -219,7 +219,7 @@ COLOR_DATABASE = [
 # ============================================================
 # CONFIGURAZIONE MAXISCHERMO ESP (MULTI-PANNELLO UDP)
 # ============================================================
-ESP_ENABLED = "auto"  # "auto" = rileva automaticamente, True = forza ON, False = forza OFF
+ESP_ENABLED = False  # "auto" = rileva automaticamente, True = forza ON, False = forza OFF
 ESP_IPS = ["192.168.1.61", "192.168.1.62", "192.168.1.63", "192.168.1.64", "192.168.1.65", "192.168.1.68"]
 ESP_PORT = 4210
 
